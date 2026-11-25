@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { CatalogSummarySection } from './components/CatalogSummarySection';
+import { ChatWidget } from './components/ChatWidget';
 import { CompatibilityChecker } from './components/CompatibilityChecker';
 import { Footer } from './components/Footer';
 import { Header } from './components/Header';
@@ -187,6 +188,12 @@ export default function App() {
         onClose={() => setWaModalOpen(false)}
         formattedText={formattedSummaryText}
         itemCount={summaryItems.length}
+      />
+
+      <ChatWidget
+        custName={custName}
+        custLoc={custLoc}
+        summaryItems={summaryItems}
       />
     </div>
   );
