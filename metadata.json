@@ -1,0 +1,6 @@
+{
+  "name": "Toko Akmal — Accessories Laptop & HP Banda Aceh",
+  "description": "Platform konsultasi kompatibilitas aksesori laptop & HP, layanan pasang & setup konter, titip stok pre-order, dan katalog acuan resmi Toko Akmal Banda Aceh.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
