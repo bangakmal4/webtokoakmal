@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Bookmark, CheckCircle2, Plus, Trash2 } from 'lucide-react';
+import { Bookmark, CheckCircle2, MessageSquare, Plus, Trash2 } from 'lucide-react';
 import { PREORDER_PRODUCT_OPTIONS } from '../data/storeData';
 import { PreorderItem, PriceTier } from '../types';
 
@@ -7,12 +7,14 @@ interface PreorderSectionProps {
   preorderQueue: PreorderItem[];
   onSubmitPreorder: (item: Omit<PreorderItem, 'id' | 'date'>) => void;
   onRemovePreorder: (id: string) => void;
+  onSendPreorderToChat?: () => void;
 }
 
 export const PreorderSection: React.FC<PreorderSectionProps> = ({
   preorderQueue,
   onSubmitPreorder,
   onRemovePreorder,
+  onSendPreorderToChat,
 }) => {
   const [product, setProduct] = useState(PREORDER_PRODUCT_OPTIONS[0].value);
   const [tier, setTier] = useState<PriceTier>('Ekonomis');
@@ -235,7 +237,7 @@ export const PreorderSection: React.FC<PreorderSectionProps> = ({
 
             {/* Current Demand Log Board */}
             <div className="bg-stoneCard p-5 rounded-xl border border-borderSubtle space-y-4">
-              <div className="flex items-center justify-between border-b border-borderSubtle pb-3">
+              <div className="flex flex-wrap items-center justify-between gap-2 border-b border-borderSubtle pb-3">
                 <div>
                   <h4 className="font-heading font-bold text-sm text-inkCharcoal">
                     Daftar Titipan Stok Aktif Anda
@@ -244,9 +246,21 @@ export const PreorderSection: React.FC<PreorderSectionProps> = ({
                     Tersimpan otomatis di peramban Anda
                   </p>
                 </div>
-                <span className="text-xs font-bold text-inkCharcoal font-tabular">
-                  {preorderQueue.length} Item
-                </span>
+                <div className="flex items-center gap-2.5">
+                  <span className="text-xs font-bold text-inkCharcoal font-tabular">
+                    {preorderQueue.length} Item
+                  </span>
+                  {preorderQueue.length > 0 && onSendPreorderToChat && (
+                    <button
+                      type="button"
+                      onClick={onSendPreorderToChat}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md bg-emeraldDeep text-white text-xs font-semibold hover:bg-emerald-800 transition-colors cursor-pointer whitespace-nowrap"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>Kirim ke Chatbot</span>
+                    </button>
+                  )}
+                </div>
               </div>
 
               <div className="space-y-2.5">

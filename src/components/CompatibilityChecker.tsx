@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   BatteryCharging,
   Briefcase,
@@ -9,6 +9,7 @@ import {
   Home,
   Laptop,
   Lightbulb,
+  MessageSquare,
   Mouse,
   Plus,
   Shield,
@@ -26,16 +27,28 @@ import { DeviceType, NeedCategory, UserProfile } from '../types';
 
 interface CompatibilityCheckerProps {
   onAddToSummary: (title: string, priceOrNote: string, category: string) => void;
+  onSelectionChange?: (selection: {
+    device: DeviceType;
+    category: NeedCategory;
+    profile: UserProfile;
+  }) => void;
+  onAskInChat?: (promptText: string) => void;
 }
 
 export const CompatibilityChecker: React.FC<CompatibilityCheckerProps> = ({
   onAddToSummary,
+  onSelectionChange,
+  onAskInChat,
 }) => {
   const [device, setDevice] = useState<DeviceType>('laptop');
   const [category, setCategory] = useState<NeedCategory>('power');
   const [profile, setProfile] = useState<UserProfile>('mahasiswa');
   const [checkedIds, setCheckedIds] = useState<Record<string, boolean>>({});
   const [recentlyAdded, setRecentlyAdded] = useState<string | null>(null);
+
+  useEffect(() => {
+    onSelectionChange?.({ device, category, profile });
+  }, [device, category, profile, onSelectionChange]);
 
   const compatResult = useMemo(() => {
     if (device === 'keduanya') {
@@ -64,6 +77,17 @@ export const CompatibilityChecker: React.FC<CompatibilityCheckerProps> = ({
     );
     setRecentlyAdded('checklist');
     setTimeout(() => setRecentlyAdded(null), 1200);
+  };
+
+  const handleAskCompatibilityInChat = () => {
+    if (!onAskInChat) return;
+    const devLabel = device === 'keduanya' ? 'Laptop & HP' : device.toUpperCase();
+    const catLabel = CATEGORY_LABELS[category];
+    const profLabel = PROFILE_LABELS[profile];
+    const checkSummary = compatResult.checks.map((c) => c.item).join(', ');
+    onAskInChat(
+      `Saya butuh konsultasi kompatibilitas untuk ${devLabel} kategori ${catLabel} (profil: ${profLabel}). Poin yang ingin saya pastikan: ${checkSummary}. Rekomendasi aksesori ekonomis s.d. premium apa yang cocok di Toko Akmal?`
+    );
   };
 
   const handleAddRecomm = (name: string, price: string) => {
@@ -267,23 +291,35 @@ export const CompatibilityChecker: React.FC<CompatibilityCheckerProps> = ({
                     {compatResult.title}
                   </h3>
                 </div>
-                <button
-                  type="button"
-                  onClick={handleAddChecklist}
-                  className="inline-flex items-center text-xs font-semibold px-3.5 py-2 rounded-lg bg-stoneCard border border-borderSubtle text-inkCharcoal hover:bg-emeraldDeep hover:text-white hover:border-emeraldDeep transition-colors whitespace-nowrap shrink-0 cursor-pointer"
-                >
-                  {recentlyAdded === 'checklist' ? (
-                    <>
-                      <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
-                      <span>Ditambahkan</span>
-                    </>
-                  ) : (
-                    <>
-                      <Plus className="w-3.5 h-3.5 mr-1.5" />
-                      <span>Tambah ke Ringkasan</span>
-                    </>
+                <div className="flex flex-wrap items-center gap-2">
+                  {onAskInChat && (
+                    <button
+                      type="button"
+                      onClick={handleAskCompatibilityInChat}
+                      className="inline-flex items-center text-xs font-semibold px-3.5 py-2 rounded-lg bg-emeraldDeep text-white hover:bg-emeraldAccent transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5 mr-1.5" />
+                      <span>Tanya di Chatbot</span>
+                    </button>
                   )}
-                </button>
+                  <button
+                    type="button"
+                    onClick={handleAddChecklist}
+                    className="inline-flex items-center text-xs font-semibold px-3.5 py-2 rounded-lg bg-stoneCard border border-borderSubtle text-inkCharcoal hover:bg-emeraldDeep hover:text-white hover:border-emeraldDeep transition-colors whitespace-nowrap shrink-0 cursor-pointer"
+                  >
+                    {recentlyAdded === 'checklist' ? (
+                      <>
+                        <CheckCircle2 className="w-3.5 h-3.5 mr-1.5" />
+                        <span>Ditambahkan</span>
+                      </>
+                    ) : (
+                      <>
+                        <Plus className="w-3.5 h-3.5 mr-1.5" />
+                        <span>Tambah ke Ringkasan</span>
+                      </>
+                    )}
+                  </button>
+                </div>
               </div>
 
               {/* Dynamic Checklist */}

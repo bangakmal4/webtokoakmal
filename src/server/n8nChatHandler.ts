@@ -1,14 +1,27 @@
-import { GoogleGenAI, ThinkingLevel } from '@google/genai';
-
 export interface ChatSummaryContextItem {
   title: string;
   priceOrNote: string;
   category: string;
 }
 
+export interface ChatPreorderContextItem {
+  product: string;
+  tier: string;
+  device: string;
+  urgency: string;
+  notes: string;
+}
+
 export interface ChatHistoryTurn {
   role: 'user' | 'assistant';
   text: string;
+}
+
+export interface ChatContextMetadata {
+  selectedDevice?: string;
+  selectedCategory?: string;
+  selectedProfile?: string;
+  activeTab?: string;
 }
 
 export interface ChatRequestPayload {
@@ -20,21 +33,24 @@ export interface ChatRequestPayload {
     location?: string;
   };
   summaryItems?: ChatSummaryContextItem[];
+  preorderItems?: ChatPreorderContextItem[];
+  context?: ChatContextMetadata;
 }
 
 export interface ChatHandlerResult {
   status: number;
   body: {
     reply?: string;
-    source?: 'n8n' | 'gemini-fallback';
-    configured?: boolean;
+    source?: 'n8n';
     error?: string;
+    reason?: 'empty_output' | 'timeout' | 'upstream_error' | 'network_error' | 'invalid_input';
   };
 }
 
 const DEFAULT_N8N_WEBHOOK_URL =
-  'https://n8n-n8n.cea37q.easypanel.host/webhook/chatbot-toko-akmal';
+  'https://n8n-n8n.cea37q.easypanel.host/webhook/tokoakmal-chat';
 
+const UPSTREAM_TIMEOUT_MS = 45_000;
 const RATE_WINDOW_MS = 60_000;
 const RATE_MAX_REQUESTS = 25;
 const rateBuckets = new Map<string, { count: number; resetAt: number }>();
@@ -45,47 +61,6 @@ const NON_REPLY_N8N_DEFAULTS = new Set([
   'ok',
   'success',
 ]);
-
-const TOKO_AKMAL_SYSTEM_INSTRUCTION = `Kamu adalah Asisten Resmi Toko Akmal Accessories Laptop & HP di Kota Banda Aceh.
-Motto toko: "Murah, Lengkap, Terjangkau, dan Terpercaya".
-
-Gaya komunikasi:
-- Jawab dalam Bahasa Indonesia yang ramah, natural, spesifik, dan langsung menjawab inti pertanyaan pengguna (JANGAN memakai format template kaku atau mengulang daftar katalog lengkap jika pengguna hanya menanyakan 1 hal spesifik).
-- Panggil pengguna dengan sopan ("Kak" atau sebut namanya jika tersedia).
-- Berikan penjelasan teknis yang jujur dan praktis (misalnya voltase/wattase charger, pin barrel vs USB-C PD, layar 2.5D/curved untuk tempered glass, port Type-C untuk USB Hub/mouse).
-- Jika perlu informasi lanjutan (misalnya seri laptop/HP atau daya adaptor bawaan), tanyakan singkat dan relevan.
-- Jaga jawaban ringkas (sekitar 2–5 kalimat atau poin singkat seperlunya), mudah dibaca di jendela chat, tanpa markdown rumit seperti tabel.
-
-Data resmi Toko Akmal Banda Aceh:
-- Lokasi & Area Layanan: Kota Banda Aceh, Aceh (dekat koridor kampus USK, UIN, Unida & perkantoran; melayani Syiah Kuala, Kuta Alam, Baiturrahman & sekitarnya).
-- Jam Operasional: Setiap hari, 09.00 – 21.30 WIB.
-- WhatsApp Konsultasi: +62 822-7798-xxxx.
-- Layanan Konter Unggulan: Konsultasi & uji coba fisik kompatibilitas port/watt/fitting tas GRATIS di meja gerai; garansi uji fungsi di konter; transparansi biaya disepakati sebelum pengerjaan.
-
-Katalog 12 Produk Acuan (tersedia tier Ekonomis, Reguler, Premium):
-1. Kabel Data HP (Type-C / Lightning, fast charge braided): Rp15.000 – Rp100.000
-2. Charger HP (Batok Fast Charge QC 3.0 / PD 20W–65W GaN): Rp30.000 – Rp250.000
-3. Mouse Laptop (Kabel / Wireless / Bluetooth Silent Click): Rp35.000 – Rp250.000
-4. Keyboard (Compact / Tenkeyless, membran & mechanical): Rp25.000 – Rp300.000
-5. Headset / Earphone / TWS (mic jernih kuliah/meeting): Rp25.000 – Rp350.000
-6. USB Hub & Multiport Adapter (Type-C ke USB 3.0 / HDMI 4K / card reader): Rp25.000 – Rp250.000
-7. Stand Laptop Alumunium Lipat Ergonomis: Rp20.000 – Rp100.000
-8. Powerbank Fast Charge (aman penerbangan, dual output): Rp15.000 – Rp80.000
-9. Casing HP (Silikon hingga Shockproof / Military-grade): Rp130.000 – Rp700.000+
-10. Tempered Glass (Layar & Lensa 9H, clear / matte / anti-spy): Rp70.000 – Rp400.000
-11. Tas / Sleeve Laptop (Busa tebal & waterproof 13"–15.6"): Rp80.000 – Rp350.000
-12. Charger Laptop (Adaptor Multi-Pin & USB-C PD 45W/65W/100W): Rp75.000 – Rp350.000
-
-Tarif Jasa Teknis Konter:
-- Pemasangan Tempered Glass HP & Tablet (anti-gelembung): Rp5.000 – Rp20.000
-- Setup Perangkat Dasar (akun, driver, printer thermal kasir UMKM): Rp15.000 – Rp50.000
-- Pembersihan Ringan Luar (port Type-C, sela keyboard, layar, kipas luar): Rp20.000 – Rp50.000
-- Pemasangan Aksesori Laptop (skin keyboard/screen/stand): Rp10.000 – Rp25.000
-- Bantuan Instalasi Software Legal (Microsoft 365, antivirus resmi, utilitas): Rp25.000 – Rp50.000
-- Konsultasi Pemilihan Aksesori di Toko: Gratis.
-
-Kebijakan Titip Stok / Pre-Order:
-- Jika tipe aksesori langka atau spesifikasi khusus belum tersedia di rak, pelanggan bisa mengisi formulir Titip Stok / Pre-Order di website (pilih kategori, tier Ekonomis/Reguler/Premium, seri perangkat, dan urgensi). Toko Akmal membandingkan 2–3 supplier distributor tanpa mark-up sepihak.`;
 
 function checkRateLimit(clientKey: string): boolean {
   const now = Date.now();
@@ -127,44 +102,121 @@ function validateWebhookUrl(rawUrl: string): URL | null {
   }
 }
 
-function extractReplyFromN8n(data: unknown): string | null {
+const METADATA_KEYS_TO_IGNORE = new Set([
+  'sessionid',
+  'session_id',
+  'action',
+  'status',
+  'source',
+  'timestamp',
+  'id',
+  'executionid',
+  'workflowid',
+  'ok',
+  'success',
+  'code',
+  'role',
+  'type',
+  'model',
+]);
+
+function normalizeReplyText(raw: string): string {
+  return raw
+    .replace(/\r\n/g, '\n')
+    .replace(/\\r\\n/g, '\n')
+    .replace(/\\n/g, '\n')
+    .replace(/<br\s*\/?>/gi, '\n')
+    .trim();
+}
+
+export function extractReplyFromN8n(data: unknown, depth = 0): string | null {
+  if (depth > 8 || data === null || data === undefined) {
+    return null;
+  }
+
   if (typeof data === 'string') {
     const trimmed = data.trim();
     if (!trimmed) return null;
-    if (NON_REPLY_N8N_DEFAULTS.has(trimmed.toLowerCase())) {
+
+    // Unwrap stringified JSON objects/arrays/strings (common in n8n Respond to Webhook Text mode)
+    if (
+      (trimmed.startsWith('{') && trimmed.endsWith('}')) ||
+      (trimmed.startsWith('[') && trimmed.endsWith(']')) ||
+      (trimmed.startsWith('"') && trimmed.endsWith('"'))
+    ) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (parsed !== data) {
+          const unwrapped = extractReplyFromN8n(parsed, depth + 1);
+          if (unwrapped) return unwrapped;
+          if (parsed && typeof parsed === 'object') {
+            return null;
+          }
+        }
+      } catch {
+        // Not valid JSON; treat as plain reply text below
+      }
+    }
+
+    const cleaned = normalizeReplyText(trimmed);
+    if (!cleaned) return null;
+    if (NON_REPLY_N8N_DEFAULTS.has(cleaned.toLowerCase())) {
       return null;
     }
-    return trimmed;
+    return cleaned;
   }
 
   if (Array.isArray(data)) {
+    const collected: string[] = [];
     for (const item of data) {
-      const extracted = extractReplyFromN8n(item);
-      if (extracted) return extracted;
+      const extracted = extractReplyFromN8n(item, depth + 1);
+      if (extracted) collected.push(extracted);
     }
-    return null;
+    return collected.length > 0 ? collected.join('\n\n') : null;
   }
 
   if (data && typeof data === 'object') {
     const record = data as Record<string, unknown>;
-
-    // Standard n8n / AI Agent / Respond to Webhook fields
     const candidateKeys = [
-      'output',
       'reply',
+      'output',
       'response',
-      'message',
       'text',
+      'message',
+      'balasan',
+      'jawaban',
+      'pesan',
+      'hasil',
+      'chatOutput',
+      'replyText',
+      'botReply',
+      'aiResponse',
+      'output_text',
+      'generated_text',
       'answer',
+      'result',
       'content',
       'parts',
       'choices',
       'candidates',
+      'json',
+      'body',
       'data',
+      'item',
+      'items',
     ];
     for (const key of candidateKeys) {
       if (key in record) {
-        const extracted = extractReplyFromN8n(record[key]);
+        const extracted = extractReplyFromN8n(record[key], depth + 1);
+        if (extracted) return extracted;
+      }
+    }
+
+    // Fallback: inspect remaining non-metadata keys if workflow uses a custom field name
+    for (const [key, value] of Object.entries(record)) {
+      if (METADATA_KEYS_TO_IGNORE.has(key.toLowerCase())) continue;
+      if (typeof value === 'string' || (value && typeof value === 'object')) {
+        const extracted = extractReplyFromN8n(value, depth + 1);
         if (extracted) return extracted;
       }
     }
@@ -173,65 +225,8 @@ function extractReplyFromN8n(data: unknown): string | null {
   return null;
 }
 
-async function generateContextualGeminiReply(
-  message: string,
-  history: ChatHistoryTurn[],
-  customer: { name: string; location: string },
-  summaryItems: ChatSummaryContextItem[]
-): Promise<string | null> {
-  const apiKey = process.env.GEMINI_API_KEY?.trim();
-  if (!apiKey || apiKey === 'MY_GEMINI_API_KEY') {
-    return null;
-  }
-
-  const ai = new GoogleGenAI({
-    apiKey,
-    httpOptions: {
-      headers: {
-        'User-Agent': 'aistudio-build',
-      },
-    },
-  });
-
-  const contextLines: string[] = [];
-  if (customer.name) contextLines.push(`Nama pelanggan: ${customer.name}`);
-  if (customer.location) contextLines.push(`Lokasi pelanggan: ${customer.location}`);
-  if (summaryItems.length > 0) {
-    const itemsText = summaryItems
-      .map((item, idx) => `${idx + 1}. [${item.category}] ${item.title} (${item.priceOrNote})`)
-      .join('; ');
-    contextLines.push(`Item di ringkasan konsultasi pelanggan saat ini: ${itemsText}`);
-  }
-
-  const fullSystemInstruction =
-    contextLines.length > 0
-      ? `${TOKO_AKMAL_SYSTEM_INSTRUCTION}\n\nKonteks sesi pelanggan saat ini:\n${contextLines.join('\n')}`
-      : TOKO_AKMAL_SYSTEM_INSTRUCTION;
-
-  const contents = [
-    ...history.map((turn) => ({
-      role: turn.role === 'assistant' ? 'model' : 'user',
-      parts: [{ text: turn.text }],
-    })),
-    {
-      role: 'user',
-      parts: [{ text: message }],
-    },
-  ];
-
-  const response = await ai.models.generateContent({
-    model: 'gemini-4-hydrogen',
-    contents,
-    config: {
-      systemInstruction: fullSystemInstruction,
-      thinkingConfig: {
-        thinkingLevel: ThinkingLevel.LOW,
-      },
-    },
-  });
-
-  const replyText = response.text?.trim();
-  return replyText && replyText.length > 0 ? replyText : null;
+function sanitizeShortString(val: unknown, maxLen: number): string {
+  return typeof val === 'string' ? val.trim().slice(0, maxLen) : '';
 }
 
 export async function handleN8nChat(
@@ -242,7 +237,9 @@ export async function handleN8nChat(
     return {
       status: 429,
       body: {
-        error: 'Terlalu banyak permintaan dalam waktu singkat. Mohon tunggu sebentar lalu coba lagi.',
+        error:
+          'Permintaan terlalu cepat dalam waktu singkat. Mohon tunggu beberapa detik lalu coba kembali.',
+        reason: 'upstream_error',
       },
     };
   }
@@ -250,7 +247,7 @@ export async function handleN8nChat(
   if (!rawBody || typeof rawBody !== 'object') {
     return {
       status: 400,
-      body: { error: 'Format payload pesan tidak valid.' },
+      body: { error: 'Format pesan tidak valid.', reason: 'invalid_input' },
     };
   }
 
@@ -258,7 +255,7 @@ export async function handleN8nChat(
   if (typeof input.message !== 'string') {
     return {
       status: 400,
-      body: { error: 'Pesan tidak boleh kosong.' },
+      body: { error: 'Pesan tidak boleh kosong.', reason: 'invalid_input' },
     };
   }
 
@@ -266,31 +263,35 @@ export async function handleN8nChat(
   if (!trimmedMessage) {
     return {
       status: 400,
-      body: { error: 'Pesan tidak boleh kosong.' },
+      body: { error: 'Pesan tidak boleh kosong.', reason: 'invalid_input' },
     };
   }
 
   if (trimmedMessage.length > 2000) {
     return {
       status: 400,
-      body: { error: 'Pesan terlalu panjang (maksimal 2.000 karakter).' },
+      body: {
+        error: 'Pesan terlalu panjang (maksimal 2.000 karakter).',
+        reason: 'invalid_input',
+      },
     };
   }
 
   const safeSessionId =
     typeof input.sessionId === 'string' && /^[a-zA-Z0-9_-]{4,100}$/.test(input.sessionId)
       ? input.sessionId
-      : 'session_default';
+      : 'akmal-session-default';
 
   const safeCustomer = {
-    name:
-      typeof input.customer?.name === 'string'
-        ? input.customer.name.trim().slice(0, 100)
-        : '',
-    location:
-      typeof input.customer?.location === 'string'
-        ? input.customer.location.trim().slice(0, 120)
-        : '',
+    name: sanitizeShortString(input.customer?.name, 100),
+    location: sanitizeShortString(input.customer?.location, 120),
+  };
+
+  const safeContext: ChatContextMetadata = {
+    selectedDevice: sanitizeShortString(input.context?.selectedDevice, 40),
+    selectedCategory: sanitizeShortString(input.context?.selectedCategory, 40),
+    selectedProfile: sanitizeShortString(input.context?.selectedProfile, 40),
+    activeTab: sanitizeShortString(input.context?.activeTab, 60),
   };
 
   const safeSummaryItems: ChatSummaryContextItem[] = Array.isArray(input.summaryItems)
@@ -308,6 +309,26 @@ export async function handleN8nChat(
           title: item.title.slice(0, 160),
           priceOrNote: item.priceOrNote.slice(0, 160),
           category: item.category.slice(0, 80),
+        }))
+    : [];
+
+  const safePreorderItems: ChatPreorderContextItem[] = Array.isArray(input.preorderItems)
+    ? input.preorderItems
+        .slice(0, 10)
+        .filter(
+          (item): item is ChatPreorderContextItem =>
+            Boolean(item) &&
+            typeof item === 'object' &&
+            typeof item.product === 'string' &&
+            typeof item.tier === 'string' &&
+            typeof item.device === 'string'
+        )
+        .map((item) => ({
+          product: item.product.slice(0, 140),
+          tier: item.tier.slice(0, 40),
+          device: item.device.slice(0, 140),
+          urgency: sanitizeShortString(item.urgency, 80),
+          notes: sanitizeShortString(item.notes, 200),
         }))
     : [];
 
@@ -329,14 +350,17 @@ export async function handleN8nChat(
     : [];
 
   const configuredWebhook =
-    process.env.N8N_WEBHOOK_URL?.trim() || DEFAULT_N8N_WEBHOOK_URL;
+    process.env.WEBHOOK_URL?.trim() ||
+    process.env.N8N_WEBHOOK_URL?.trim() ||
+    DEFAULT_N8N_WEBHOOK_URL;
 
   const validatedUrl = validateWebhookUrl(configuredWebhook);
   if (!validatedUrl) {
     return {
       status: 500,
       body: {
-        error: 'Konfigurasi N8N_WEBHOOK_URL pada server tidak valid. Pastikan menggunakan URL http/https yang benar.',
+        error: 'Konfigurasi alamat webhook asisten belum valid.',
+        reason: 'upstream_error',
       },
     };
   }
@@ -346,25 +370,48 @@ export async function handleN8nChat(
     Accept: 'application/json, text/plain;q=0.9',
   };
 
-  const webhookSecret = process.env.N8N_WEBHOOK_SECRET?.trim();
-  if (webhookSecret) {
-    headers['X-Webhook-Secret'] = webhookSecret;
+  const contextParts: string[] = [];
+  if (safeCustomer.name) contextParts.push(`Nama: ${safeCustomer.name}`);
+  if (safeCustomer.location) contextParts.push(`Lokasi: ${safeCustomer.location}`);
+  if (safeContext.selectedDevice) contextParts.push(`Perangkat: ${safeContext.selectedDevice}`);
+  if (safeContext.selectedCategory) contextParts.push(`Kategori: ${safeContext.selectedCategory}`);
+  if (safeContext.selectedProfile) contextParts.push(`Profil: ${safeContext.selectedProfile}`);
+  if (safeSummaryItems.length > 0) {
+    contextParts.push(
+      `Ringkasan (${safeSummaryItems.length} item): ${safeSummaryItems
+        .map((i) => `${i.title} [${i.priceOrNote}]`)
+        .join('; ')}`
+    );
+  }
+  if (safePreorderItems.length > 0) {
+    contextParts.push(
+      `Pre-Order (${safePreorderItems.length} item): ${safePreorderItems
+        .map((p) => `${p.product} (${p.tier}) u/ ${p.device}`)
+        .join('; ')}`
+    );
   }
 
   const outboundPayload = {
-    chatInput: trimmedMessage,
-    message: trimmedMessage,
-    text: trimmedMessage,
+    action: 'sendMessage',
     sessionId: safeSessionId,
-    source: 'web-toko-akmal',
+    session_id: safeSessionId,
+    message: trimmedMessage,
+    chatInput: trimmedMessage,
+    text: trimmedMessage,
+    input: trimmedMessage,
+    prompt: trimmedMessage,
+    source: 'web-toko-akmal-banda-aceh',
     timestamp: new Date().toISOString(),
     customer: safeCustomer,
+    context: safeContext,
+    contextSummary: contextParts.join(' | '),
     summaryItems: safeSummaryItems,
+    preorderItems: safePreorderItems,
     history: safeHistory,
   };
 
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), 25_000);
+  const timeout = setTimeout(() => controller.abort(), UPSTREAM_TIMEOUT_MS);
 
   try {
     const upstream = await fetch(validatedUrl.toString(), {
@@ -381,7 +428,9 @@ export async function handleN8nChat(
       return {
         status: 502,
         body: {
-          error: `Webhook n8n mengembalikan status ${upstream.status}. Pastikan workflow aktif dan node Respond to Webhook dikonfigurasi.`,
+          error:
+            'Asisten otomatis Toko Akmal sedang tidak dapat merespons saat ini. Anda bisa langsung melanjutkan konsultasi lewat WhatsApp atau menyalin ringkasan kebutuhan Anda.',
+          reason: 'upstream_error',
         },
       };
     }
@@ -408,39 +457,16 @@ export async function handleN8nChat(
         body: {
           reply: n8nReply,
           source: 'n8n',
-          configured: true,
         },
       };
-    }
-
-    // n8n accepted the webhook (HTTP 200) but returned an empty reply field.
-    // Generate a genuine contextual answer via server-side Gemini instead of any static template.
-    try {
-      const dynamicReply = await generateContextualGeminiReply(
-        trimmedMessage,
-        safeHistory,
-        safeCustomer,
-        safeSummaryItems
-      );
-      if (dynamicReply) {
-        return {
-          status: 200,
-          body: {
-            reply: dynamicReply,
-            source: 'gemini-fallback',
-            configured: true,
-          },
-        };
-      }
-    } catch {
-      // Fall through to explicit error below so empty n8n responses are never masked by templates
     }
 
     return {
       status: 502,
       body: {
         error:
-          'Webhook n8n terhubung (HTTP 200), namun field "reply" yang dikembalikan kosong. Periksa mapping output pada node Respond to Webhook di n8n Anda (misalnya gunakan {{ $json.output }}).',
+          'Pesan sudah diterima layanan asisten, namun belum ada balasan teks yang kembali dari server n8n. Silakan coba kirim ulang atau lanjutkan langsung via WhatsApp Toko Akmal Banda Aceh.',
+        reason: 'empty_output',
       },
     };
   } catch (err) {
@@ -449,8 +475,9 @@ export async function handleN8nChat(
       status: 504,
       body: {
         error: isAbort
-          ? 'Permintaan ke webhook n8n melewati batas waktu (25 detik). Silakan coba lagi.'
-          : 'Gagal terhubung ke webhook n8n. Periksa kembali status workflow atau koneksi server n8n Anda.',
+          ? 'Waktu tunggu balasan asisten habis. Silakan coba lagi atau lanjutkan langsung ke WhatsApp konter Toko Akmal.'
+          : 'Koneksi ke layanan asisten sedang terganggu. Anda tetap bisa menyalin ringkasan atau menghubungi konter via WhatsApp.',
+        reason: isAbort ? 'timeout' : 'network_error',
       },
     };
   } finally {

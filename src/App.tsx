@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { CatalogSummarySection } from './components/CatalogSummarySection';
-import { ChatWidget } from './components/ChatWidget';
+import { ChatContextState, ChatWidget } from './components/ChatWidget';
 import { CompatibilityChecker } from './components/CompatibilityChecker';
+import { ErrorBoundary } from './components/ErrorBoundary';
 import { Footer } from './components/Footer';
 import { Header } from './components/Header';
 import { HeroSection } from './components/HeroSection';
 import { PreorderSection } from './components/PreorderSection';
 import { ServicesSection } from './components/ServicesSection';
 import { WhatsAppModal } from './components/WhatsAppModal';
-import { PreorderItem, SummaryItem } from './types';
+import { DeviceType, NeedCategory, PreorderItem, SummaryItem, UserProfile } from './types';
 
 const STORAGE_KEYS = {
   SUMMARY: 'toko_akmal_summary_v1',
@@ -48,6 +49,22 @@ export default function App() {
     }
   });
   const [waModalOpen, setWaModalOpen] = useState(false);
+  const [chatOpen, setChatOpen] = useState(false);
+  const [pendingChatPrompt, setPendingChatPrompt] = useState<{
+    id: number;
+    text: string;
+    activeTab?: string;
+  } | null>(null);
+  const [compatSelection, setCompatSelection] = useState<{
+    device: DeviceType;
+    category: NeedCategory;
+    profile: UserProfile;
+  }>({
+    device: 'laptop',
+    category: 'power',
+    profile: 'mahasiswa',
+  });
+  const [activeTab, setActiveTab] = useState<string>('beranda');
 
   useEffect(() => {
     try {
@@ -127,6 +144,71 @@ export default function App() {
     }
   };
 
+  const handleSelectionChange = useCallback(
+    (selection: { device: DeviceType; category: NeedCategory; profile: UserProfile }) => {
+      setCompatSelection(selection);
+    },
+    []
+  );
+
+  const handleOpenChatWithPrompt = useCallback((text: string, sourceTab?: string) => {
+    if (sourceTab) {
+      setActiveTab(sourceTab);
+    }
+    setChatOpen(true);
+    setPendingChatPrompt({
+      id: Date.now(),
+      text,
+      activeTab: sourceTab,
+    });
+  }, []);
+
+  const handleConsumePendingPrompt = useCallback(() => {
+    setPendingChatPrompt(null);
+  }, []);
+
+  const handleAskCompatibilityInChat = useCallback(
+    (promptText: string) => {
+      handleOpenChatWithPrompt(promptText, 'kompatibilitas');
+    },
+    [handleOpenChatWithPrompt]
+  );
+
+  const handleSendPreorderToChat = useCallback(() => {
+    if (preorderQueue.length === 0) return;
+    const lines = preorderQueue.map(
+      (po, idx) =>
+        `${idx + 1}. ${po.product} (kelas ${po.tier}) untuk ${po.device} — urgensi: ${po.urgency}${po.notes ? `, catatan: ${po.notes}` : ''}`
+    );
+    const prompt = `Halo Toko Akmal, saya ingin menanyakan ketersediaan stok / titip pre-order untuk daftar berikut:\n${lines.join('\n')}\nMohon info estimasi harga dan ketersediaannya di gerai Banda Aceh.`;
+    handleOpenChatWithPrompt(prompt, 'preorder');
+  }, [preorderQueue, handleOpenChatWithPrompt]);
+
+  const handleSendSummaryToChat = useCallback(() => {
+    if (summaryItems.length === 0) {
+      handleOpenChatWithPrompt(
+        'Halo Toko Akmal, saya ingin konsultasi rekomendasi aksesori laptop/HP dan ketersediaan stok di Banda Aceh.',
+        'ringkasan'
+      );
+      return;
+    }
+    const lines = summaryItems.map(
+      (item, idx) => `${idx + 1}. [${item.category}] ${item.title} (${item.priceOrNote})`
+    );
+    const prompt = `Halo Toko Akmal, ini ringkasan kebutuhan saya:\n${lines.join('\n')}\nMohon cek kecocokan, estimasi harga, dan ketersediaan di gerai Banda Aceh.`;
+    handleOpenChatWithPrompt(prompt, 'ringkasan');
+  }, [summaryItems, handleOpenChatWithPrompt]);
+
+  const chatContextState = useMemo<ChatContextState>(
+    () => ({
+      selectedDevice: compatSelection.device,
+      selectedCategory: compatSelection.category,
+      selectedProfile: compatSelection.profile,
+      activeTab,
+    }),
+    [compatSelection, activeTab]
+  );
+
   const formattedSummaryText = useMemo(() => {
     const name = custName.trim() || 'Pelanggan Toko Akmal';
     const loc = custLoc.trim() || 'Banda Aceh';
@@ -160,12 +242,17 @@ export default function App() {
 
       <main className="flex-1">
         <HeroSection />
-        <CompatibilityChecker onAddToSummary={addToSummary} />
+        <CompatibilityChecker
+          onAddToSummary={addToSummary}
+          onSelectionChange={handleSelectionChange}
+          onAskInChat={handleAskCompatibilityInChat}
+        />
         <ServicesSection onAddServiceToSummary={handleAddServiceToSummary} />
         <PreorderSection
           preorderQueue={preorderQueue}
           onSubmitPreorder={handlePreorderSubmit}
           onRemovePreorder={handleRemovePreorder}
+          onSendPreorderToChat={handleSendPreorderToChat}
         />
         <CatalogSummarySection
           summaryItems={summaryItems}
@@ -177,6 +264,7 @@ export default function App() {
           onRemoveFromSummary={removeFromSummary}
           onClearSummary={clearSummary}
           onOpenWhatsAppModal={() => setWaModalOpen(true)}
+          onSendSummaryToChat={handleSendSummaryToChat}
           formattedSummaryText={formattedSummaryText}
         />
       </main>
@@ -190,11 +278,21 @@ export default function App() {
         itemCount={summaryItems.length}
       />
 
-      <ChatWidget
-        custName={custName}
-        custLoc={custLoc}
-        summaryItems={summaryItems}
-      />
+      <ErrorBoundary compact fallbackTitle="Panel obrolan sedang dimuat ulang">
+        <ChatWidget
+          isOpen={chatOpen}
+          onOpenChange={setChatOpen}
+          pendingPrompt={pendingChatPrompt}
+          onConsumePendingPrompt={handleConsumePendingPrompt}
+          custName={custName}
+          custLoc={custLoc}
+          summaryItems={summaryItems}
+          preorderQueue={preorderQueue}
+          contextState={chatContextState}
+          formattedSummaryText={formattedSummaryText}
+          onOpenWhatsAppModal={() => setWaModalOpen(true)}
+        />
+      </ErrorBoundary>
     </div>
   );
 }

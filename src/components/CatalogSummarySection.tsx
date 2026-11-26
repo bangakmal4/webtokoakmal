@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from 'react';
-import { Check, Copy, MessageCircle, Plus, Search, X } from 'lucide-react';
+import { Check, Copy, MessageCircle, MessageSquare, Plus, Search, X } from 'lucide-react';
 import { CATALOG_PRODUCTS } from '../data/storeData';
 import { SummaryItem } from '../types';
 
@@ -13,6 +13,7 @@ interface CatalogSummarySectionProps {
   onRemoveFromSummary: (id: string) => void;
   onClearSummary: () => void;
   onOpenWhatsAppModal: () => void;
+  onSendSummaryToChat?: () => void;
   formattedSummaryText: string;
 }
 
@@ -26,6 +27,7 @@ export const CatalogSummarySection: React.FC<CatalogSummarySectionProps> = ({
   onRemoveFromSummary,
   onClearSummary,
   onOpenWhatsAppModal,
+  onSendSummaryToChat,
   formattedSummaryText,
 }) => {
   const [filterGroup, setFilterGroup] = useState<'semua' | 'laptop' | 'hp'>('semua');
@@ -311,6 +313,17 @@ export const CatalogSummarySection: React.FC<CatalogSummarySectionProps> = ({
                     <MessageCircle className="w-4 h-4" />
                     <span>Kirim Ringkasan via WhatsApp</span>
                   </button>
+
+                  {onSendSummaryToChat && (
+                    <button
+                      type="button"
+                      onClick={onSendSummaryToChat}
+                      className="w-full py-2.5 bg-emerald-50 text-emeraldDeep font-semibold text-xs rounded-lg border border-emerald-200 hover:bg-emerald-100 transition-colors flex items-center justify-center gap-1.5 cursor-pointer"
+                    >
+                      <MessageSquare className="w-3.5 h-3.5" />
+                      <span>Konsultasikan Ringkasan di Chatbot</span>
+                    </button>
+                  )}
 
                   <button
                     type="button"
