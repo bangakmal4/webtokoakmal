@@ -392,14 +392,8 @@ export async function handleN8nChat(
   }
 
   const outboundPayload = {
-    action: 'sendMessage',
     sessionId: safeSessionId,
-    session_id: safeSessionId,
     message: trimmedMessage,
-    chatInput: trimmedMessage,
-    text: trimmedMessage,
-    input: trimmedMessage,
-    prompt: trimmedMessage,
     source: 'web-toko-akmal-banda-aceh',
     timestamp: new Date().toISOString(),
     customer: safeCustomer,
@@ -425,11 +419,14 @@ export async function handleN8nChat(
     const rawText = await upstream.text();
 
     if (!upstream.ok) {
+      const errorText =
+        upstream.status === 404
+          ? 'Webhook asisten n8n belum aktif (404). Silakan aktifkan workflow di n8n atau lanjutkan konsultasi langsung via WhatsApp Toko Akmal Banda Aceh.'
+          : 'Asisten otomatis Toko Akmal sedang tidak dapat merespons saat ini. Anda bisa langsung melanjutkan konsultasi lewat WhatsApp atau menyalin ringkasan kebutuhan Anda.';
       return {
         status: 502,
         body: {
-          error:
-            'Asisten otomatis Toko Akmal sedang tidak dapat merespons saat ini. Anda bisa langsung melanjutkan konsultasi lewat WhatsApp atau menyalin ringkasan kebutuhan Anda.',
+          error: errorText,
           reason: 'upstream_error',
         },
       };
@@ -465,7 +462,7 @@ export async function handleN8nChat(
       status: 502,
       body: {
         error:
-          'Pesan sudah diterima layanan asisten, namun belum ada balasan teks yang kembali dari server n8n. Silakan coba kirim ulang atau lanjutkan langsung via WhatsApp Toko Akmal Banda Aceh.',
+          'Pesan sudah diterima server n8n, tetapi respons yang dikirim kembali masih kosong (belum ada teks balasan). Silakan cek node Respond to Webhook di n8n atau lanjutkan langsung via WhatsApp Toko Akmal.',
         reason: 'empty_output',
       },
     };
